@@ -15,7 +15,7 @@ def show_frame(frames: dict):
 class Camera:
 
     # Initializes camera and Mats
-    def __init__(self, device_number, output_file, previous_frames_stored=5):
+    def __init__(self, device_number, output_file, fps=25, previous_frames_stored=5, show=True):
         self.outfilename = output_file
         self._initialize_camera(device_number)
 
@@ -24,7 +24,22 @@ class Camera:
         )
         self.max_frames = previous_frames_stored
         self.frame_count = 0
-        
+        self.last_frame_time = -1
+        self.fps = fps
+
+        if show:
+            self.frame_view_functions = {
+                "color":self.get_next_frame, 
+                #"threshold": self.get_threshold_frame,
+                #"canny": self.get_canny_frame
+            }
+            for frame_name in self.frame_view_functions.keys():
+                cv2.namedWindow(frame_name, cv2.WINDOW_NORMAL)
+            
+    def _initialize_camera(self, device_number):
+        self.cap = cv2.VideoCapture(device_number)
+
+    def widget(self):            
         # frame conversion properties
         self.FONT = cv2.FONT_HERSHEY_SIMPLEX
         self.cannyMin = 30
@@ -42,24 +57,16 @@ class Camera:
         cv2.createTrackbar('threshMin', 'Image Controls', self.threshMin, 255, self.process_trackbars)
         cv2.createTrackbar('threshMax', 'Image Controls', self.threshMax, 255, self.process_trackbars)
 
-        self.frame_view_functions = {
-            "color":self.get_next_frame, 
-            "threshold": self.get_threshold_frame,
-            "canny": self.get_canny_frame
-        }
-
-        for frame_name in self.frame_view_functions.keys():
-            cv2.namedWindow(frame_name, cv2.WINDOW_NORMAL)
-            
-    def _initialize_camera(self, device_number):
-        self.cap = cv2.VideoCapture(device_number)
-
     @property
     def frames(self):
         return self._frames
 
     def get_current_views(self):
-        return {view_name: view() for view_name, view in self.frame_view_functions.items()}
+        t = time.time()
+        if 1./self.fps - (t - self.last_frame_time) < 0:
+            self.last_frame_time = time.time()
+            self.views = {view_name: view() for view_name, view in self.frame_view_functions.items()}
+        return self.views
 
     # Process frame and output the result
     # input:  string indicating what image to get
@@ -156,6 +163,7 @@ class MyVideoWriter:
 def main():
     print("Camera Demo")
     camera = Camera(0, "output")
+    widget = camera.widget()
     key = ''
 
     class_names = []
@@ -173,7 +181,7 @@ def main():
         # get all views of the current camera frame
         frame_views = camera.get_current_views()
 
-        show_frame(frames)
+        show_frame(frame_views)
 
 if __name__ == "__main__":
     main()
