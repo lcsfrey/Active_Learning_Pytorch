@@ -1,6 +1,3 @@
-import numpy as np
-from scipy.stats import norm
-import matplotlib.pyplot as plt
 import torch
 import torch.distributions as td
 import time
@@ -34,7 +31,7 @@ def generate_mask_from_fovea_sample(fovea_sample, image_shape):
     image_shape = torch.tensor(image_shape, dtype=torch.int64, device=DEVICE)
     zero = torch.zeros(1, dtype=torch.int64, device=DEVICE)
 
-    fovea_sample = torch.where(fovea_sample < zero, zero, fovea_sample)
+    fovea_sample = torch.where(fovea_sample <= zero, zero, fovea_sample)
     fovea_sample = torch.where(fovea_sample >= image_shape, image_shape - 1, fovea_sample)
 
     mask = torch.zeros(image_shape.tolist(), dtype=torch.bool, device=DEVICE)
@@ -55,6 +52,8 @@ class Fovea:
         self._num_samples = torch.tensor(num_samples, dtype=torch.int64, device=self.device)
         self.fps = fps
         self.last_frame_time = -1
+        self._fovea_width = 32
+        self._peripheral_width = 4
         self.mask = self.generate_mask()
 
     def foveate(self, image):
@@ -79,22 +78,46 @@ class Fovea:
     def fovea_density(self):
         return self._fovea_density.cpu()
 
-    def update_fovea_density(self, fovea_density):
-        # amp is the current value of the slider
-        self._fovea_density = torch.tensor(
-            fovea_density, dtype=torch.float64, device=self.device)
-
     @property
     def num_samples(self):
         return self._num_samples.cpu()
 
-    def update_num_samples(self, num_samples):
+    @property
+    def fovea_width(self):
+        return self._fovea_width
+
+    @property
+    def peripheral_width(self):
+        return self._peripheral_width
+
+    @fovea_density.setter
+    def fovea_density(self, fovea_density):
+        self._fovea_density = torch.tensor(
+            fovea_density, dtype=torch.float64, device=self.device)
+
+    @num_samples.setter
+    def num_samples(self, num_samples):
         self._num_samples = torch.tensor(
             num_samples, dtype=torch.int32, device=self.device)
 
+    @fovea_width.setter
+    def fovea_width(self, fovea_width):
+        self._fovea_width = torch.tensor(
+            fovea_width, dtype=torch.float64, device=self.device)
+
+    @peripheral_width.setter
+    def peripheral_width(self, peripheral_width):
+        self._peripheral_width = torch.tensor(
+            peripheral_width, dtype=torch.int32, device=self.device)
+
+
     def generate_mask(self, image_shape=DEFAULT_MASK_SHAPE):
         sample = generate_fovea_sample(
-            self.num_samples, self.fovea_density, image_shape)
+            self._num_samples, 
+            self._fovea_density, 
+            image_shape=image_shape,
+            fovea_width_factor=self._fovea_width, 
+            spread_width_factor=self._peripheral_width)
         self.mask = generate_mask_from_fovea_sample(sample, image_shape)
         return self.mask
 
@@ -102,51 +125,82 @@ class Fovea:
         # update the image
         self.image.set_data(self.mask.cpu())
 
-        # redraw canvas while idle
-        self.fig.canvas.draw_idle()
-
     def widget(self):
+        import matplotlib.pyplot as plt
         from matplotlib.widgets import Slider
-        self.fig, self.ax = plt.subplots()
-        self.image = plt.imshow(self.mask.cpu())
+        self.fig = plt.figure()
 
-        self.ax_fovea = plt.axes([0.25, .03, 0.50, 0.02])
-        self.ax_num_samples = plt.axes([0.25, .08, 0.50, 0.02])
+        self.ax_image            = plt.axes([0.00, 0.25, 1.00, 0.75])
+        self.ax_fovea_density    = plt.axes([0.25, 0.16, 0.50, 0.04])
+        self.ax_num_samples      = plt.axes([0.25, 0.11, 0.50, 0.04])
+        self.ax_fovea_width      = plt.axes([0.25, 0.06, 0.50, 0.04])
+        self.ax_peripheral_width = plt.axes([0.25, 0.01, 0.50, 0.04])
 
-        # Fovea slider
-        num_samples = self._num_samples.cpu()
-        self.slider_fovea = Slider(self.ax_fovea, 'Fovea Density', 0, 1, valinit=self.fovea_density)
-        self.slider_num_samples = Slider(self.ax_num_samples, 'Num Samples', 0, num_samples*3, 
-                                    valinit=num_samples, valfmt='%1d')
+        self.image = self.ax_image.imshow(self.mask.cpu())
+
+        # Setup sliders
+        self.slider_fovea_density = Slider(
+            ax=self.ax_fovea_density, 
+            label='Fovea Density', 
+            valmin=0, 
+            valmax=1, 
+            valinit=self.fovea_density
+        )
+        self.slider_num_samples = Slider(
+            ax=self.ax_num_samples, 
+            label='Num Samples', 
+            valmin=0, 
+            valmax=self.num_samples*3, 
+            valinit=self.num_samples, 
+            valfmt='%1d'
+        )
+        self.slider_fovea_width = Slider(
+            ax=self.ax_fovea_width, 
+            label='Fovea Width', 
+            valmin=4, 
+            valmax=128, 
+            valinit=self.fovea_width
+        )
+        self.slider_peripheral_width = Slider(
+            ax=self.ax_peripheral_width, 
+            label='Peripheral Width', 
+            valmin=2, 
+            valmax=64, 
+            valinit=self.peripheral_width
+        )
+
+        # Add callback function to change associated member valiables
+        # when sliders are moved
+        self.slider_fovea_density.on_changed(
+            lambda val: setattr(self, "fovea_density", val))
+        self.slider_num_samples.on_changed(
+            lambda val: setattr(self, "num_samples", val))
+        self.slider_fovea_width.on_changed(
+            lambda val: setattr(self, "fovea_width", val))
+        self.slider_peripheral_width.on_changed(
+            lambda val: setattr(self, "peripheral_width", val))
         
+        self.slider_fovea_density.on_changed(
+            lambda val: self.update_mask_view())
+        self.slider_num_samples.on_changed(
+            lambda val: self.update_mask_view())
+        self.slider_fovea_width.on_changed(
+            lambda val: self.update_mask_view())
+        self.slider_peripheral_width.on_changed(
+            lambda val: self.update_mask_view())
 
-        # call update function on slider value change
-        self.slider_fovea.on_changed(lambda val: self.update_fovea_density(val))
-        self.slider_num_samples.on_changed(lambda val: self.update_num_samples(val))
-        
-        self.slider_fovea.on_changed(lambda val: self.update_mask_view())
-        self.slider_num_samples.on_changed(lambda val: self.update_mask_view())
-
+        plt.show(block=False)
 
 
 def camera_fovea_demo():
-
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.animation as animation
-    from matplotlib.widgets import Slider
-
     import cv2
-    from PIL import Image
     from camera import Camera, show_frame
     
     camera = Camera(0, "output", fps=45)
 
     fovea = Fovea(fps=5)
     control = fovea.widget()
-    plt.show(block=False)
-    while True:
-        camera.grab_next_frame()
+    while camera.grab_next_frame():
         frame_views = camera.get_current_views()
 
         foveated_image = fovea.foveate(frame_views["color"])

@@ -115,12 +115,12 @@ class Camera:
     # update frames
     def grab_next_frame(self):
         ret, new_frame = self.cap.read()
-        assert ret
         self._frames.append(new_frame)
         old_frame = self._frames.popleft()
 
         self.frame_count += 1
         self.text_display_offset = 20
+        return ret
 
     def processKey(self, key):
         if key == ord('q'):
