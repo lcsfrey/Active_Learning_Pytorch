@@ -3,19 +3,20 @@ import numpy as np
 import time
 from collections import deque
 
-def showFrame(frame_name, frame):
+def show_frame(frame_name, frame):
     cv2.imshow(frame_name, frame)
 
-def show_frame(frames: dict):
+def show_frames(frames: dict):
     for frame_name, frame in frames.items():
-        showFrame(frame_name, frame)
+        show_frame(frame_name, frame)
 
 
 # Webcam object used to interact with frames
 class Camera:
 
     # Initializes camera and Mats
-    def __init__(self, device_number, output_file, fps=25, previous_frames_stored=5, show=True):
+    def __init__(self, device_number, output_file, fps=25, 
+                 previous_frames_stored=5, show=True, view_names=["color"]):
         self.outfilename = output_file
         self._initialize_camera(device_number)
 
@@ -26,12 +27,17 @@ class Camera:
         self.frame_count = 0
         self.last_frame_time = -1
         self.fps = fps
+        self.view_names = view_names
 
         if show:
-            self.frame_view_functions = {
+            frame_view_functions = {
                 "color":self.get_next_frame, 
-                #"threshold": self.get_threshold_frame,
-                #"canny": self.get_canny_frame
+                "threshold": self.get_threshold_frame,
+                "canny": self.get_canny_frame
+            }
+            self.frame_view_functions = {
+                view_name: frame_view_functions[view_name] 
+                for view_name in self.view_names
             }
             for frame_name in self.frame_view_functions.keys():
                 cv2.namedWindow(frame_name, cv2.WINDOW_NORMAL)
@@ -41,21 +47,46 @@ class Camera:
 
     def widget(self):            
         # frame conversion properties
-        self.FONT = cv2.FONT_HERSHEY_SIMPLEX
-        self.cannyMin = 30
-        self.cannyMax = 150
-        self.threshMin = 40
-        self.threshMax = 220
-        self.minPixels = 500
+        self.canny_min = 30
+        self.canny_max = 150
+        self.thresh_min = 40
+        self.thresh_max = 220
 
         # Create a black image, a window
         cv2.namedWindow('Image Controls')
 
         # create trackbars for thresholds
-        cv2.createTrackbar('cannyMin', 'Image Controls', self.cannyMin, 255, self.process_trackbars)
-        cv2.createTrackbar('cannyMax', 'Image Controls', self.cannyMax, 255, self.process_trackbars)
-        cv2.createTrackbar('threshMin', 'Image Controls', self.threshMin, 255, self.process_trackbars)
-        cv2.createTrackbar('threshMax', 'Image Controls', self.threshMax, 255, self.process_trackbars)
+        cv2.createTrackbar(
+            'canny_min', 
+            'Image Controls', 
+            self.canny_min, 
+            255, 
+            lambda val: setattr(self, 'canny_min', val)
+        )
+        cv2.createTrackbar(
+            'canny_max', 
+            'Image Controls', 
+            self.canny_max, 
+            255, 
+            lambda val: setattr(self, 'canny_max', val)
+        )
+        cv2.createTrackbar(
+            'thresh_min', 
+            'Image Controls', 
+            self.thresh_min, 
+            255, 
+            lambda val: setattr(self, 'thresh_min', val)
+        )
+        cv2.createTrackbar(
+            'thresh_max', 
+            'Image Controls', 
+            self.thresh_max, 
+            255, 
+            lambda val: setattr(self, 'thresh_max', val)
+        )
+
+    def __getitem__(self, index):
+        return self._frames[index]
 
     @property
     def frames(self):
@@ -65,7 +96,10 @@ class Camera:
         t = time.time()
         if 1./self.fps - (t - self.last_frame_time) < 0:
             self.last_frame_time = time.time()
-            self.views = {view_name: view() for view_name, view in self.frame_view_functions.items()}
+            self.views = {
+                view_name: view() 
+                for view_name, view in self.frame_view_functions.items()
+            }
         return self.views
 
     # Process frame and output the result
@@ -87,7 +121,7 @@ class Camera:
 
     def get_canny_frame(self, image=None, dilation_kernel=(3,3), dilation_iterations=1, 
                     canny_min=None, canny_max = None):
-        canny = cv2.Canny(self.get_gray_frame(), self.cannyMin, self.cannyMax)
+        canny = cv2.Canny(self.get_gray_frame(), self.canny_min, self.canny_max)
         for i in range (dilation_iterations):
             canny = cv2.dilate(canny, dilation_kernel)
         return canny
@@ -96,33 +130,20 @@ class Camera:
         t_gray1 = cv2.cvtColor(self._frames[-1].copy(), cv2.COLOR_BGR2GRAY)
         t_gray2 = cv2.cvtColor(self._frames[-2].copy(), cv2.COLOR_BGR2GRAY)
         difference = cv2.absdiff(t_gray1, t_gray2)
-        ret, threshold = cv2.threshold(difference, self.threshMin, self.threshMax, cv2.THRESH_BINARY)
+        ret, threshold = cv2.threshold(difference, self.thresh_min, self.thresh_max, cv2.THRESH_BINARY)
         threshold = cv2.dilate(threshold, (3, 3))
         return threshold
-
-    # get current positions of trackbars
-    def process_trackbars(self, x):
-        print(x)
-        self.cannyMin = cv2.getTrackbarPos('cannyMin', 'Image Controls')
-        self.cannyMax = cv2.getTrackbarPos('cannyMax', 'Image Controls')
-        self.threshMin = cv2.getTrackbarPos('threshMin', 'Image Controls')
-        self.threshMax = cv2.getTrackbarPos('threshMax', 'Image Controls')
-
-    def display_text(self, image, text, color=(0, 0, 255)):
-        cv2.putText(image, text, (5, self.text_display_offset), self.FONT, .75, color, 2)
-        self.text_display_offset += 20
         
     # update frames
     def grab_next_frame(self):
-        ret, new_frame = self.cap.read()
-        self._frames.append(new_frame)
         old_frame = self._frames.popleft()
+        ret, new_frame = self.cap.read(image=old_frame)
+        self._frames.append(new_frame)
 
         self.frame_count += 1
-        self.text_display_offset = 20
         return ret
 
-    def processKey(self, key):
+    def process_key(self, key):
         if key == ord('q'):
             return 'q'
 
@@ -160,28 +181,23 @@ class MyVideoWriter:
         if self.can_record is True:
             self.out = start_recording()
 
-def main():
+def camera_demo():
     print("Camera Demo")
-    camera = Camera(0, "output")
+    camera = Camera(0, "output", view_names=["color", "threshold", "canny"])
     widget = camera.widget()
-    key = ''
 
-    class_names = []
+    while camera.grab_next_frame():
+        # get all views of the current camera frame
+        frame_views = camera.get_current_views()
 
-    while True:
+        show_frames(frame_views)
+
+        # process key presses
         key = cv2.waitKey(1)
         if key == ord('q'):
             break
         else:
-            camera.processKey(key)
-
-        # grab the next frame
-        camera.grab_next_frame()
-        
-        # get all views of the current camera frame
-        frame_views = camera.get_current_views()
-
-        show_frame(frame_views)
+            camera.process_key(key)
 
 if __name__ == "__main__":
-    main()
+    camera_demo()

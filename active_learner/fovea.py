@@ -41,7 +41,8 @@ def generate_mask_from_fovea_sample(fovea_sample, image_shape):
 
 
 class Fovea:
-    def __init__(self, alpha=0.5, fovea_density=0.7, num_samples=50000, fps=25, device=DEVICE):
+    def __init__(self, alpha=0.5, fovea_density=0.7, num_samples=50000, 
+                 fps=25, device=DEVICE):
         #TODO: Add mean adjustment to allow for dynamic attention
         #TODO: Add standard deviation adjustment to allow for dynamic focus
 
@@ -201,21 +202,19 @@ def camera_fovea_demo():
     fovea = Fovea(fps=5)
     control = fovea.widget()
     while camera.grab_next_frame():
-        frame_views = camera.get_current_views()
+        foveated_image = fovea.foveate(camera.frames[-1])
 
-        foveated_image = fovea.foveate(frame_views["color"])
-        frame_views["color"] = foveated_image.cpu().type(torch.uint8).numpy()
+        show_frame(frame_name="color", 
+                   frame=foveated_image.cpu().type(torch.uint8).numpy())
 
-        show_frame(frame_views)
-
+        # process key presses
         key = cv2.waitKey(1)
         if key == ord('q'):
             break
         elif key == -1:
-            camera.processKey(key)
             continue
-        else:
-            print(fovea.mask.sum(dtype=torch.float32)/fovea.mask.numel())
+
+        print(fovea.mask.sum(dtype=torch.float32)/fovea.mask.numel())
 
 
 if __name__ == "__main__":
