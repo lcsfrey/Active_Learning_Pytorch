@@ -391,28 +391,21 @@ def run_active_learner():
     )
 
     learner = ActiveLearner(model=model, input_size=input_size)
-
     class_names = ["background"]
     current_class = 0
 
     camera = Camera(0, "output")
-    # grab the next frame
-    camera.grab_next_frame()
-    # get all views of the current camera frame
-    frame_views = camera.get_current_views()
-    
-    image_shape = frame_views["color"].shape[:2]
 
-    fovea = Fovea(image_shape, fovea_density=0.9)
-    control = fovea.setup_fovea_control()
+    fovea = Fovea()
+    control = fovea.widget()
     plt.show(block=False)
 
     while True:
         camera.grab_next_frame()
         frame_views = camera.get_current_views()
 
-        mask = fovea.generate_mask()
-        frame_views["color"] = np.where(mask[..., None].cpu().numpy(), frame_views["color"], 0)
+        foveated_image = fovea.foveate(frame_views["color"])
+        frame_views["color"] = foveated_image.cpu().type(torch.uint8).numpy()
 
         show_frame(frame_views)
     
@@ -437,7 +430,8 @@ def run_active_learner():
             continue
         else:
             y_pred = learner(color_frame_pil)
-
+        
+        print(fovea.mask.sum(dtype=torch.float32)/fovea.mask.numel())
         print(f"Key {key} ({chr(key)}) pressed")
         print(f"Total classes: {len(class_names)}")
         print(f"Current class: {current_class}")
